@@ -20,6 +20,11 @@ nix run .
 Wine の仮想 Windows 環境と LINE のユーザーデータは、既定では
 `$XDG_DATA_HOME/line-wine`（未設定時は `~/.local/share/line-wine`）に保存されます。
 
+LINE 26.1 以降には Windows DLL の署名検査があり、未対策の Wine では
+`NO_SIGNATURE` エラーが発生します。この flake は専用 Wine prefix 内の DLL に
+ローカルな互換署名を付けます。これは Microsoft が発行した署名ではなく、
+ホスト OS の証明書ストアや Nix ストアには登録・変更されません。
+
 ## NixOS / Home Manager から利用する
 
 このリポジトリを flake input に追加し、パッケージへ指定します。

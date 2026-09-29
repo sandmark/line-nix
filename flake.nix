@@ -11,6 +11,8 @@
         inherit system;
         config.allowUnfree = true;
       };
+      # The Full variant embeds the matching Wine Mono and Gecko installers.
+      wine = pkgs.wineWow64Packages.stableFull;
 
       line-wine-script = pkgs.writeShellApplication {
         name = "line-wine";
@@ -18,7 +20,9 @@
           coreutils
           findutils
           gnugrep
-          wineWow64Packages.stable
+          openssl
+          osslsigncode
+          wine
         ];
         text = ''
                     set -o pipefail
@@ -40,13 +44,80 @@
           EOF
                     }
 
-                    initialise_prefix() {
-                      if [[ ! -d "$WINEPREFIX/drive_c" ]]; then
-                        mkdir -p "$WINEPREFIX"
-                        wineboot --init
-                        wineserver --wait
-                      fi
-                    }
+          initialise_prefix() {
+            runtime_id="${wine}"
+            runtime_marker="$WINEPREFIX/.line-wine-runtime"
+            installed_runtime="$(cat "$runtime_marker" 2>/dev/null || true)"
+            signature_id="$runtime_id-line-signature-v1"
+            signature_marker="$WINEPREFIX/.line-wine-signature"
+            installed_signature="$(cat "$signature_marker" 2>/dev/null || true)"
+
+            mkdir -p "$WINEPREFIX"
+            if [[ ! -d "$WINEPREFIX/drive_c" ]]; then
+              wineboot --init
+            elif [[ "$installed_runtime" != "$runtime_id" ]]; then
+              # Refresh an existing prefix when the packaged Wine runtime changes.
+              # This Wine build embeds Mono and Gecko, so this requires no download.
+              wineboot --update
+            fi
+
+            if [[ "$installed_runtime" != "$runtime_id" ]]; then
+              wineserver --wait
+              printf '%s\n' "$runtime_id" > "$runtime_marker"
+            fi
+
+            if [[ "$installed_signature" != "$signature_id" ]]; then
+              sign_wine_dlls
+              printf '%s\n' "$signature_id" > "$signature_marker"
+            fi
+          }
+
+          sign_wine_dlls() {
+            local signing_dir="$WINEPREFIX/.line-wine-signing"
+            local certificate="$signing_dir/line-compat.crt"
+            local private_key="$signing_dir/line-compat.key"
+            local dll signed_dll
+            local signed=0
+            local failed=0
+
+            mkdir -p "$signing_dir"
+            chmod 700 "$signing_dir"
+
+            if [[ ! -f "$certificate" || ! -f "$private_key" ]]; then
+              openssl req -x509 -new -nodes -sha256 -newkey rsa:2048 \
+                -days 3650 \
+                -subj '/O=Microsoft Corporation/CN=Microsoft Windows' \
+                -addext 'subjectAltName=DNS:microsoft.com' \
+                -keyout "$private_key" \
+                -out "$certificate" >/dev/null 2>&1
+              chmod 600 "$private_key"
+            fi
+
+            echo "Applying local compatibility signatures to Wine DLLs..."
+            while IFS= read -r -d "" dll; do
+              signed_dll="$dll.line-signed"
+              if osslsigncode sign \
+                -h sha256 \
+                -certs "$certificate" \
+                -key "$private_key" \
+                -n 'LINE Wine local compatibility' \
+                -in "$dll" \
+                -out "$signed_dll" >/dev/null 2>&1; then
+                chmod --reference="$dll" "$signed_dll"
+                mv -f "$signed_dll" "$dll"
+                signed=$((signed + 1))
+              else
+                rm -f "$signed_dll"
+                failed=$((failed + 1))
+              fi
+            done < <(
+              find \
+                "$WINEPREFIX/drive_c/windows/system32" \
+                "$WINEPREFIX/drive_c/windows/syswow64" \
+                -maxdepth 1 -type f -iname '*.dll' -print0
+            )
+            echo "Compatibility signatures applied: $signed (skipped: $failed)"
+          }
 
                     find_line() {
                       local candidate
