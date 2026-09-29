@@ -5,7 +5,17 @@ Windows 版 LINE を Wine で起動するための Nix flake です。
 
 ## 初回セットアップ
 
-LINE 公式サイトから Windows 版インストーラー (`LineInst.exe`) を取得し、次を実行します。
+LINE の配布URLから Windows 版インストーラー (`LineInst.exe`) をダウンロードします。
+
+```console
+mkdir -p ~/Downloads
+curl --fail --location \
+  --output ~/Downloads/LineInst.exe \
+  http://desktop.line-scdn.net/win/new/LineInst.exe
+```
+
+`--location` は配布サーバーの HTTPS へのリダイレクトを追跡するために指定しています。
+ダウンロード後、インストーラーを起動します。
 
 ```console
 nix run . -- --install ~/Downloads/LineInst.exe
@@ -63,3 +73,8 @@ LINE_WINEPREFIX="$HOME/.wine-line-test" nix run .
 
 LINE 本体や更新後のバージョンによっては Wine で動作しない場合があります。
 インストーラー自体はライセンス上この flake に含めていません。
+
+## ライセンス
+
+このプロジェクトは [Unlicense](LICENSE) によりパブリックドメインへ提供されています。
+商用・非商用を問わず、誰でも任意の目的で利用、改変、複製、再配布できます。
